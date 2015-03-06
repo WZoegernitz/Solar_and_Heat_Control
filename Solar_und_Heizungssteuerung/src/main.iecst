@@ -1,0 +1,396 @@
+PROGRAM Heating
+	VAR
+		/* I/O image */
+		inputs : Inputs;
+		outputs : Outputs;
+		HK_waermer, HK_kaelter, FBH_waermer, FBH_kaelter, WZo : BOOL;
+		WR_needed_FBH_k, WR_needed_FBH_w, WR_needed_HK_w, WR_needed_HK_k,WR_needed_Schichtlader_A, WR_needed_Schichtlader_B, WR_needed:BOOL;
+		i, j, k, Regler_R, Regler_L : INT;
+		Dach, FBH_VL, Puffer_unten, Puffer_mitte, Puffer_oben, Waermetauscher, HK_VL, Aussen, Zimmer, FBH_Soll, HK_Soll:REAL;
+		Regeltoleranz:REAL:=1; /* gibt an, wie viel Unterschied IST-SOLL bei den Heizkreisen sein darf */
+		test : array[0..39] of BOOL;
+		/* I/O access functions */
+		read_inputs : ReadInputs;
+		write_outputs : WriteOutputs;
+        RTRIG_SL_A, RTRIG_SL_B : R_TRIG;
+        TOF1, TOF_Reglerzyklus, TOF3, TOF4 : TOF;
+        TOF_SPP1, TOF_SPP2, TOF_SPS:TOF; /* S..Solar  P...Pumpe  P...Primär/S..ekundär */
+        SPP1_needed, SPP2_needed, SPS_needed :BOOL;
+        SPP1_nachlaufzeit, SPP2_nachlaufzeit:TIME:=TIME#300s;
+        SPS_nachlaufzeit : TIME:=TIME#30s;
+        PLTD:REAL:=3; /* gibt an, ab welcher Temp-diff (Wärmetauscher-Puffer) die SPS (Solarpumpe Sekundär) laufen soll */
+        Puffer_laden_sinnvoll : BOOL;
+        TON_wait_4_temp_increase : TON;
+        wait_for_better_efficiency,P3mustON, P3_soll_ein : BOOL;
+        Schichtlader_soll_A, Schichtlader_soll_B, Schichtlader_goes_to_A : BOOL;
+        TOF_SLA, TOF_SLB : TOF;
+        SL_Motor_A, SL_Motor_B : BOOL;
+        Schichtladeventilverfahrzeit : TIME:=TIME#30s;
+        temp_increase_waiting_time : TIME:=TIME#300s;
+        TON_Reglerzyklus, TON2, TON3, TON4, TON_Test, TON_Test1 : TON;
+        TON_HK_waermer, TON_HK_kaelter, TON_FBH_waermer, TON_FBH_kaelter : TON;
+		WR_OFF_TIME : TIME:=T#30s;
+		Regler_cycle_time : TIME:=TIME#5s;
+		Regler_moving_time : TIME:=TIME#1s500ms;
+		alive : BOOL;
+		Puffer_ratio : INT; /* Füllstand des Puffers */
+		Puffer_sum : REAL; /* Puffer oben + Puffer mitte + Puffer unten */
+		LED_ratio : INT;
+		Status_LED : BOOL;
+		LED_CYCLE_TIME : TIME:=TIME#4s;
+    	LED_ON_TIME : TIME;
+    	TON_LED_CYCLE : TON;
+    	TOF_LED_CYCLE : TOF;
+    	LED_CYCLE_REAL : REAL;	
+    	TOF_ratter_FBH_waermer, TOF_ratter_FBH_kaelter, TOF_ratter_HK_waermer, TOF_ratter_HK_kaelter : TOF;
+		TOF_HK_Pumpennachlauf, TOF_FBH_Pumpennachlauf : TOF;
+		FBH_PUMPE, HK_PUMPE : BOOL;
+		TON_ERROR : TON;
+		TOF_ERROR : TOF;
+		Plant_ERROR : BOOL;
+		Solar_Kabelbruch_ERROR : BOOL;
+		Solar_Kabelkurzschluss_ERROR : BOOL;
+		TOF_Spannungswandler : TOF;
+		Wandler_needed : BOOL;
+		TOF_WT_einfrierschutz : TOF;
+		WT_needs_einfrierschutz : BOOL;
+		FTRIG_loadstop : F_TRIG;
+		loadstop : BOOL;
+		loadstop_temp : REAL;
+		TON_loadstop_reset, TON_loadstop : TON;
+		TON_Ratiometer : TON;
+	END_VAR
+	
+		read_inputs(inputs := REF(inputs));
+	
+	/* program logic here START */
+	
+	
+	// Variables for default FALSE:
+	WR_needed := FALSE;
+	Plant_ERROR := FALSE;
+	Solar_Kabelbruch_ERROR := FALSE;
+	Solar_Kabelkurzschluss_ERROR :=FALSE;
+	Puffer_laden_sinnvoll:=FALSE;
+    SPP1_needed:=FALSE;
+    SPP2_needed:=FALSE;
+    wait_for_better_efficiency:=FALSE;
+	P3_soll_ein:=FALSE;
+    Schichtlader_soll_A:=FALSE;
+    Schichtlader_soll_B:=FALSE;
+	P3mustON:=FALSE;
+	Schichtlader_goes_to_A:=FALSE;
+    RTRIG_SL_A(CLK:=FALSE);
+    outputs.Schichtlader_mitte_laden:=FALSE;    
+    outputs.Schichtlader_fahren:=FALSE;
+	Wandler_needed := FALSE;
+	WT_needs_einfrierschutz := FALSE;
+	SPS_needed := FALSE;
+	
+
+
+	
+	
+	/* determing value for rotary switches in livingrom */
+	Regler_R :=0;
+	IF (inputs.Regler_R_Bit0=TRUE) THEN Regler_R := Regler_R + 1;
+	END_IF;
+	IF (inputs.Regler_R_Bit1=TRUE) THEN Regler_R := Regler_R + 2;
+	END_IF;
+	IF (inputs.Regler_R_Bit2=TRUE) THEN Regler_R := Regler_R + 4;
+	END_IF;
+	Regler_L :=0;
+	IF (inputs.Regler_L_Bit0=TRUE) THEN Regler_L := Regler_L + 1;
+    END_IF;
+    IF (inputs.Regler_L_Bit1=TRUE) THEN Regler_L := Regler_L + 2;
+	END_IF;
+	IF (inputs.Regler_L_Bit2=TRUE) THEN Regler_L := Regler_L + 4;
+	END_IF;
+	IF (Regler_R=0) THEN FBH_Soll:=0;
+    END_IF;	
+	IF (Regler_R=1) THEN FBH_Soll:=21;
+    END_IF;
+    IF (Regler_R=2) THEN FBH_Soll:=22;
+    END_IF;
+    IF (Regler_R=3) THEN FBH_Soll:=23;
+    END_IF;
+    IF (Regler_R=4) THEN FBH_Soll:=24;
+    END_IF;
+    IF (Regler_R=5) THEN FBH_Soll:=25;
+    END_IF;
+    IF (Regler_R=6) THEN FBH_Soll:=26;
+    END_IF;
+    IF (Regler_R=7) THEN FBH_Soll:=27;
+    END_IF;
+    IF (Regler_L=0) THEN HK_Soll:=0;
+    END_IF;
+    IF (Regler_L=1) THEN HK_Soll:=29;
+    END_IF;
+    IF (Regler_L=2) THEN HK_Soll:=35;
+    END_IF;
+    IF (Regler_L=3) THEN HK_Soll:=41;
+    END_IF;
+    IF (Regler_L=4) THEN HK_Soll:=47;
+    END_IF;
+    IF (Regler_L=5) THEN HK_Soll:=53;
+    END_IF;
+    IF (Regler_L=6) THEN HK_Soll:=59;
+    END_IF;
+    IF (Regler_L=7) THEN HK_Soll:=65;
+    END_IF;
+    
+    
+    /* Ist Heizung in Betrieb, so wird der Wechselrichter benötigt */
+    IF Regler_L<>0 OR Regler_R<>0 THEN WR_needed:=TRUE; END_IF; 
+    
+    
+    
+    /* Wenn Regler auf "0" steht, Heizungs-Pumpe aus */
+    HK_PUMPE:=TRUE;
+    IF (Regler_L=0) THEN HK_PUMPE:=FALSE; END_IF;
+    TOF_HK_Pumpennachlauf(IN:=HK_PUMPE,PT:=TIME#5s);
+    outputs.Pumpe_HK:=TOF_HK_Pumpennachlauf.Q;
+    
+    
+    
+    /* Wenn Regler auf "0" steht, Fussboden Heizungs-Pumpe aus */    
+    FBH_PUMPE:=TRUE;
+    IF (Regler_R=0) THEN FBH_PUMPE:=FALSE; END_IF;
+	TOF_FBH_Pumpennachlauf(IN:=FBH_PUMPE,PT:=TIME#5s);   
+    IF NOT inputs.thermofuse_active THEN outputs.Pumpe_FBH:=TOF_FBH_Pumpennachlauf.Q; END_IF;
+    IF inputs.thermofuse_active THEN outputs.Pumpe_FBH:=FALSE; END_IF;
+    
+    
+    /* Umrechnung digits zu physikalischer Größe in °C */
+    Dach:=TO_REAL(inputs.ai1)*2-100;
+    Waermetauscher:=TO_REAL(inputs.ai6)*0.4696-136;
+    FBH_VL:=TO_REAL(inputs.ai2)*0.4696-136;
+    Puffer_unten:=TO_REAL(inputs.ai3)*0.4696-136;
+    Puffer_mitte:=TO_REAL(inputs.ai4)*0.4696-136;
+    Puffer_oben:=TO_REAL(inputs.ai5)*0.4696-136;
+    HK_VL:=TO_REAL(inputs.ai7)*0.4696-136;
+    Zimmer:=TO_REAL(inputs.ai8)*0.4696-136;
+    Aussen:=TO_REAL(inputs.ai9)*0.4696-136;
+    
+    
+    
+    
+    
+    /* Regelung Heizkoerperkreis */
+    HK_waermer:=FALSE;
+    IF (HK_VL<(HK_Soll-Regeltoleranz))THEN
+    HK_waermer:=TRUE;
+    END_IF;
+        
+    HK_kaelter:=FALSE;
+    IF (HK_VL>(HK_Soll+Regeltoleranz))THEN
+    HK_kaelter:=TRUE;
+    END_IF;
+    
+    
+    // Hier wird der Verfahr- zu Pause Rythmus bei den Heizreglern erzeugt    
+    TON_Reglerzyklus(IN:=NOT(TON_Reglerzyklus.Q), PT:=Regler_cycle_time);
+    TOF_Reglerzyklus(IN:=TON_Reglerzyklus.Q, PT:=Regler_moving_time);
+    
+    
+    // Stotterverhinderung: um zu verhindern, dass Output "stottert" wenn Temperaturwert gerade springt
+       //Änderungsrequest muss bestimmte Zeit anstehen:
+    TON_HK_waermer(IN:=HK_waermer,PT:=TIME#1s);
+    TON_HK_kaelter(IN:=HK_kaelter,PT:=TIME#1s);
+       // ein Änderungsrequest soll dann einen Zyklus lang anstehen
+    TOF_ratter_HK_waermer(IN:=TON_HK_waermer.Q,PT:=Regler_moving_time);
+    TOF_ratter_HK_kaelter(IN:=TON_HK_kaelter.Q,PT:=Regler_moving_time);
+    outputs.HK_kaelter:=AND(TOF_Reglerzyklus.Q,TOF_ratter_HK_kaelter.Q);
+    outputs.HK_waermer:=AND(TOF_Reglerzyklus.Q,TOF_ratter_HK_waermer.Q);
+    
+    
+    /* Regelung Fussbodenheizungskreis */
+    FBH_waermer:=FALSE;
+    IF (FBH_VL<(FBH_Soll-Regeltoleranz))THEN
+    FBH_waermer:=TRUE;
+    END_IF;
+    
+    FBH_kaelter:=FALSE;
+    IF (FBH_VL>(FBH_Soll+Regeltoleranz))THEN
+    FBH_kaelter:=TRUE;
+    END_IF;
+    
+    
+    // Stotterverhinderung: um zu verhindern, dass Output "stottert" wenn Temperaturwert gerade springt"
+       //Änderungsrequest muss bestimmte Zeit anstehen:
+    TON_FBH_waermer(IN:=FBH_waermer,PT:=TIME#1s);
+    TON_FBH_kaelter(IN:=FBH_kaelter,PT:=TIME#1s);
+       // ein Änderungsrequest soll dann einen Zyklus lang anstehen
+    TOF_ratter_FBH_waermer(IN:=TON_FBH_waermer.Q,PT:=Regler_moving_time);
+    TOF_ratter_FBH_kaelter(IN:=TON_FBH_kaelter.Q,PT:=Regler_moving_time);
+    outputs.FBH_kaelter:=AND(TOF_Reglerzyklus.Q,TOF_ratter_FBH_kaelter.Q);
+    outputs.FBH_waermer:=AND(TOF_Reglerzyklus.Q,TOF_ratter_FBH_waermer.Q);
+    
+    
+    
+    // Anlagenfehlerfaelle
+    IF inputs.thermofuse_active THEN Plant_ERROR:=TRUE; END_IF;
+    IF outputs.Wechselrichter AND NOT(inputs.active_230V) THEN Plant_ERROR:=TRUE; END_IF;
+    IF inputs.ai1>750 OR inputs.ai6>750 OR inputs.ai3>750 OR inputs.ai4>750 OR inputs.ai5>750 THEN Solar_Kabelbruch_ERROR:=TRUE; END_IF; 
+    IF inputs.ai1<10 OR inputs.ai6<10 OR inputs.ai3<10 OR inputs.ai4<10 OR inputs.ai5<10 THEN Solar_Kabelkurzschluss_ERROR:=TRUE; END_IF;
+    IF Solar_Kabelbruch_ERROR OR Solar_Kabelkurzschluss_ERROR THEN Plant_ERROR:=TRUE; END_IF;
+    
+    
+    
+    // Status - LED
+    TON_LED_CYCLE(IN:=NOT(TON_LED_CYCLE.Q),PT:=LED_CYCLE_TIME);
+    LED_CYCLE_REAL:=TO_REAL(IN:=LED_CYCLE_TIME);
+    LED_CYCLE_REAL:=LED_CYCLE_REAL/100*Puffer_ratio;
+    LED_ON_TIME:=TO_TIME(IN:=LED_CYCLE_REAL);
+    TOF_LED_CYCLE(IN:=TON_LED_CYCLE.Q,PT:=LED_ON_TIME);
+    TON_ERROR(IN:=NOT(TON_ERROR.Q),PT:=TIME#1s);
+    TOF_ERROR(IN:=TON_ERROR.Q,PT:=TIME#500ms);
+    IF NOT(Plant_ERROR) THEN outputs.status_led:=TOF_LED_CYCLE.Q;
+    ELSE outputs.status_led:=TOF_ERROR.Q; END_IF;
+    
+    
+    
+    
+    
+    /* SOLAR - STEUERUNG */
+    
+	/* Einschalten der ersten Pumpe bei 35° und Dachtemp > Puffer-mitte */
+    IF(Dach>(Puffer_unten+10)) THEN 
+      SPP1_needed:=TRUE;
+      WR_needed:=TRUE;
+      outputs.Frostschutzventil:=TRUE;
+    END_IF;
+    
+    // outputs.Solarkuehlventil:=FALSE;
+    
+    // Übergangslösung:
+    IF Dach<29 THEN outputs.Frostschutzventil:=FALSE; END_IF;
+    
+    
+    
+    /* Einschalten der zweiten Pumpe bei 50° */
+    IF(Dach>50) THEN 
+      SPP2_needed:=TRUE;
+    END_IF;
+    
+    
+    /* Ist die Temp für oben noch zu klein, warten... */
+    IF(Waermetauscher<Puffer_oben) AND Dach>(Puffer_unten+5) THEN
+		wait_for_better_efficiency:=TRUE;		
+	END_IF;
+    TON_wait_4_temp_increase(IN:=wait_for_better_efficiency, PT:=temp_increase_waiting_time);
+
+    
+    /* Waermetauschertemperatur höher als Puffer oben, muss P3 laufen. Schichtladerstellung_A sinnvoll */
+    IF ((Waermetauscher-PLTD)>Puffer_oben) THEN
+    	SPS_needed:=TRUE;
+    	Schichtlader_soll_A:=TRUE;
+    	WR_needed:=TRUE;
+    END_IF;
+
+    
+    /* Solaranlage heizt, aber nicht genug für oben,...   ... dann unten (unten, nicht mitte!)! */
+    IF(Waermetauscher-PLTD)>Puffer_unten AND TON_wait_4_temp_increase.Q THEN
+    	SPS_needed:=TRUE;
+    	Schichtlader_soll_B:=TRUE;
+    	WR_needed:=TRUE;
+    END_IF;	
+
+
+    // Anfahren der A-Stellung = Puffer oben laden
+    IF Schichtlader_soll_A THEN    
+    	outputs.Schichtlader_fahren:=TRUE;
+    END_IF;
+
+
+	// Anfahren der B-Stellung = Puffer mittig laden    
+    IF Schichtlader_soll_B THEN
+    	outputs.Schichtlader_mitte_laden:=TRUE;    
+    	outputs.Schichtlader_fahren:=TRUE;
+    END_IF;
+    	 
+    
+    
+    /* Ansteuerung der Pumpen mit Nachlaufzeit */
+    TOF_SPP1(IN:=SPP1_needed,PT:=SPP1_nachlaufzeit);
+    TOF_SPP2(IN:=SPP2_needed,PT:=SPP2_nachlaufzeit);
+    TOF_SPS(IN:=SPS_needed,PT:=SPS_nachlaufzeit);
+    outputs.pumpe1:=TOF_SPP1.Q;
+    outputs.pumpe2:=TOF_SPP2.Q;
+    outputs.pumpe3:=TOF_SPS.Q;
+    
+    
+    
+    //Pufferladung (SPS) stoppt
+    
+    
+    
+    
+    // Pufferladung stoppt, Primärpumpen aus
+    FTRIG_loadstop(CLK:=outputs.pumpe3);
+    IF FTRIG_loadstop.Q THEN loadstop:=TRUE; loadstop_temp:=Dach; END_IF;
+    TON_loadstop_reset(IN:=loadstop,PT:=TIME#4h);
+    IF TON_loadstop_reset.Q THEN loadstop:=FALSE; END_IF;
+    IF loadstop AND (Dach+PLTD) > loadstop_temp THEN loadstop:=FALSE; END_IF;
+    TON_loadstop(IN:=loadstop,PT:=TIME#5m);
+    IF TON_loadstop.Q THEN outputs.pumpe1:=FALSE; outputs.pumpe2:=FALSE; END_IF;
+    
+    
+    
+    /* Spannungswandler ausschalten, wenn nicht mehr gebraucht */
+    IF SPP1_needed OR SPP2_needed OR SPS_needed THEN Wandler_needed:=TRUE; END_IF;
+    TOF_Spannungswandler(IN:=Wandler_needed,PT:=TIME#1m);
+    outputs.Spannungswandler:=TOF_Spannungswandler.Q;
+
+    
+    // Einfrierschutz und Pumpenübertemperaturschutz 
+    IF Dach<4 OR Dach>120 THEN
+    	outputs.pumpe1:=FALSE;
+    	outputs.pumpe2:=FALSE;
+    	outputs.pumpe3:=FALSE;
+    END_IF; 
+   
+    
+    
+    // Falls Ventil versagt, soll vor dem Einfrieren mit Heizwasser gewärmt werden
+    IF Waermetauscher<4 THEN WT_needs_einfrierschutz:=TRUE; Wandler_needed:=TRUE; Plant_Error:=TRUE; END_IF; 
+    TOF_WT_einfrierschutz(IN:=WT_needs_einfrierschutz,PT:=TIME#5m);
+	IF Waermetauscher<6 THEN outputs.pumpe3:=TOF_WT_einfrierschutz.Q; END_IF;	
+   
+    
+    /* Füllstand des Puffers (in %) berechnen alles: 25°C=leer, alles: 75°C ist voll*/
+    Puffer_sum:=Puffer_oben + Puffer_mitte + Puffer_unten;
+    Puffer_sum:=((Puffer_sum / 3) - 25) * 2;
+    Puffer_ratio:=TO_INT(Puffer_sum); 
+    TON_Ratiometer(IN:=NOT(TON_Ratiometer.Q),PT:=TIME#1m);
+    IF Puffer_ratio>0 AND TON_Ratiometer.Q THEN outputs.ao1:=TO_UINT(Puffer_ratio*9); END_IF;
+    IF Puffer_ratio<=0 AND TON_Ratiometer.Q THEN outputs.ao1:=0;
+    END_IF;
+    
+    
+    
+    
+    
+    
+    
+        
+    
+    
+    /* Wechselrichter schaltet ausschaltverzögert aus */
+    TOF1(PT:=WR_OFF_TIME,IN:=WR_needed);
+    outputs.Wechselrichter:=TOF1.Q;
+    
+    
+    /* program logic here END */
+	write_outputs(outputs := REF(outputs));
+
+	
+END_PROGRAM
+// LAST CHANGES
+//
+// 31. 1. AO1 Berechnung konnte negativ werden, wait4betterefficiency war Dachtempunabh!!!
+// 31. 1. Mischer warm und kalt gleichzeitig fahren unterbunden, UINT statt USINT beim ao1, SPPs aus bei längerem nicht gebrauch
+//
+/* WICHTIGES:
+ * Wie viele Schreibzylen/SPS Programmupdates schätzt RPo ein, dass möglich sind.
+ */

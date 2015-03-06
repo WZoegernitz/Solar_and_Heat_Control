@@ -1,0 +1,119 @@
+FUNCTION_BLOCK ReadInputs
+	VAR_INPUT
+		inputs : REF_TO Inputs;
+	END_VAR
+	
+	VAR
+		data : REF_TO Inputs; /* workaround */
+		fd : DINT := -1;
+		analog_in_1 : ARRAY[0..4] OF UINT;
+		analog_in_2 : ARRAY[0..4] OF UINT;
+		analog_in_3 : ARRAY[0..4] OF UINT;
+		analog_in_4 : ARRAY[0..4] OF UINT;
+		digital_in_0 : ARRAY[0..7] OF BOOL;
+		digital_in_1 : ARRAY[0..7] OF BOOL;
+		digital_in_2 : ARRAY[0..7] OF BOOL;
+		digital_in_3 : ARRAY[0..7] OF BOOL;
+		digital_in_4 : ARRAY[0..7] OF BOOL;
+	END_VAR
+	
+	data := inputs; /* workaround */
+	
+	/* read data from I/O sub-systems */
+	IF fd < 0 THEN
+		fd := I2C_Open(bus_id := 1); /* /dev/i2c-1 */
+	END_IF;
+	
+	/*
+	 * 0x38 ... Input 1
+     * 0x39 ... Input 2
+     * 0x3a ... Input 3
+     * 0x3c ... Input 4
+     * 0x3d ... Input 5
+	 */
+	
+	IF fd >= 0 THEN
+		analog_in_1 := I2HAE(fd := fd, address := 16#08);
+		data^.ai6 := analog_in_1[0];
+		data^.ai7 := analog_in_1[1];
+		data^.ai8 := analog_in_1[2];
+		data^.ai9 := analog_in_1[3];
+		data^.ai10 := analog_in_1[4];
+		
+		analog_in_2 := I2HAE(fd := fd, address := 16#09);
+		data^.ai1 := analog_in_2[0];
+		data^.ai2 := analog_in_2[1];
+		data^.ai3 := analog_in_2[2];
+		data^.ai4 := analog_in_2[3];
+		data^.ai5 := analog_in_2[4];
+		
+		analog_in_3 := I2HAE(fd := fd, address := 16#0A);
+		data^.ai11 := analog_in_3[0];
+		data^.ai12 := analog_in_3[1];
+		data^.ai13 := analog_in_3[2];
+		data^.ai14 := analog_in_3[3];
+		data^.ai15 := analog_in_3[4];
+		
+		analog_in_4 := I2HAE(fd := fd, address := 16#0B);
+		data^.ai16 := analog_in_4[0];
+		data^.ai17 := analog_in_4[1];
+		data^.ai18 := analog_in_4[2];
+		data^.ai19 := analog_in_4[3];
+		data^.ai20 := analog_in_4[4];
+		
+		digital_in_0 := I2C_PCF8574_read(fd := fd, address := 16#38);
+		data^.di0 := digital_in_0[0];
+		data^.di1 := digital_in_0[1];
+		data^.di2 := digital_in_0[2];
+		data^.di3 := digital_in_0[3];
+		data^.di4 := digital_in_0[4];
+		data^.di5 := digital_in_0[5];
+		data^.di6 := digital_in_0[6];
+		data^.di7 := digital_in_0[7];
+		
+		digital_in_1 := I2C_PCF8574_read(fd := fd, address := 16#39);
+		data^.di8 := digital_in_1[0];
+		data^.di9 := digital_in_1[1];
+		data^.di10 := digital_in_1[2];
+		data^.di11 := digital_in_1[3];
+		data^.di12 := digital_in_1[4];
+		data^.di13 := digital_in_1[5];
+		data^.di14 := digital_in_1[6];
+		data^.di15 := digital_in_1[7];
+
+		digital_in_2 := I2C_PCF8574_read(fd := fd, address := 16#3a);
+		data^.di16 := digital_in_2[0];
+		data^.di17 := digital_in_2[1];
+		data^.di18 := digital_in_2[2];
+		data^.di19 := digital_in_2[3];
+		data^.di20 := digital_in_2[4];
+		data^.di21 := digital_in_2[5];
+		data^.di22 := digital_in_2[6];
+		data^.di23 := digital_in_2[7];
+		
+		digital_in_3 := I2C_PCF8574_read(fd := fd, address := 16#3c);
+		data^.Regler_R_Bit0 := digital_in_3[0];
+		data^.Regler_L_Bit2 := digital_in_3[1];
+		data^.Regler_R_Bit1 := digital_in_3[2];
+		data^.Regler_L_Bit0 := digital_in_3[3];
+		data^.Regler_L_Bit1 := digital_in_3[4];
+		data^.Regler_R_Bit2 := digital_in_3[5];
+		data^.di30 := digital_in_3[6];
+		data^.di31 := digital_in_3[7];
+
+		digital_in_4 := I2C_PCF8574_read(fd := fd, address := 16#3d);
+		data^.active_230V := digital_in_4[0];
+		data^.thermofuse_active := digital_in_4[1];
+		data^.di34 := digital_in_4[2];
+		data^.di35 := digital_in_4[3];
+		data^.di36 := digital_in_4[4];
+		data^.di37 := digital_in_4[5];
+		data^.di38 := digital_in_4[6];
+		data^.di39 := digital_in_4[7];
+
+		ENO := TRUE;
+	ELSE
+		ENO := FALSE; /* fd < 0 */
+	END_IF;
+	
+END_FUNCTION_BLOCK

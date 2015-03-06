@@ -1,0 +1,90 @@
+FUNCTION_BLOCK WriteOutputs
+	VAR_INPUT
+		outputs : REF_TO Outputs;
+	END_VAR
+	
+	VAR
+		fd : DINT := -1;
+		cumm_do_0 : ARRAY[0..7] OF BOOL; /* cumulated digital outputs */
+		cumm_do_1 : ARRAY[0..7] OF BOOL; /* cumulated digital outputs */
+		cumm_do_2 : ARRAY[0..7] OF BOOL; /* cumulated digital outputs */
+		cumm_do_3 : ARRAY[0..7] OF BOOL; /* cumulated digital outputs */
+		cumm_do_4 : ARRAY[0..7] OF BOOL; /* cumulated digital outputs */
+	END_VAR
+	
+	ENO := FALSE;
+
+	IF fd < 0 THEN
+		fd := I2C_open(bus_id := 1);
+	END_IF;
+	
+	/*
+	 * 0x25 ... Output 1
+	 * 0x22 ... Output 2
+	 * 0x20 ... Output 3
+	 * 0x21 ... Output 4
+	 * 0x23 ... Output 5
+	 */
+	
+	IF fd >= 0 THEN
+		I2HAA(fd := fd, address := 16#68, channel := 0, value := outputs^.ao1);
+		I2HAA(fd := fd, address := 16#68, channel := 1, value := outputs^.ao2);
+		I2HAA(fd := fd, address := 16#68, channel := 2, value := outputs^.ao3);
+		I2HAA(fd := fd, address := 16#68, channel := 3, value := outputs^.ao4);
+		
+		cumm_do_0[0] := outputs^.do0;
+		cumm_do_0[1] := outputs^.do1;
+		cumm_do_0[2] := outputs^.do2;
+		cumm_do_0[3] := outputs^.do3;
+		cumm_do_0[4] := outputs^.do4;
+		cumm_do_0[5] := outputs^.do5;
+		cumm_do_0[6] := outputs^.do6;
+		cumm_do_0[7] := outputs^.do7;
+		I2C_PCF8574_write(fd := fd, address := 16#25, pin_values := cumm_do_0);
+		
+		cumm_do_1[0] := outputs^.do8;
+		cumm_do_1[1] := outputs^.do9;
+		cumm_do_1[2] := outputs^.do10;
+		cumm_do_1[3] := outputs^.do11;
+		cumm_do_1[4] := outputs^.Frostschutzventil;
+		cumm_do_1[5] := outputs^.Solarkuehlventil;
+		cumm_do_1[6] := outputs^.do14;
+		cumm_do_1[7] := outputs^.do15;
+		I2C_PCF8574_write(fd := fd, address := 16#22, pin_values := cumm_do_1);
+		
+		cumm_do_2[0] := outputs^.Status_LED;
+		cumm_do_2[1] := outputs^.do17;
+		cumm_do_2[2] := outputs^.do18;
+		cumm_do_2[3] := outputs^.do19;
+		cumm_do_2[4] := outputs^.do20;
+		cumm_do_2[5] := outputs^.do21;
+		cumm_do_2[6] := outputs^.do22;
+		cumm_do_2[7] := outputs^.do23;
+		I2C_PCF8574_write(fd := fd, address := 16#20, pin_values := cumm_do_2);
+		
+		cumm_do_3[0] := outputs^.Pumpe4;
+		cumm_do_3[1] := outputs^.Pumpe3;
+		cumm_do_3[2] := outputs^.Pumpe2;
+		cumm_do_3[3] := outputs^.Pumpe1;
+		cumm_do_3[4] := outputs^.do28;
+		cumm_do_3[5] := outputs^.do29;
+		cumm_do_3[6] := outputs^.Wechselrichter;
+		cumm_do_3[7] := outputs^.Spannungswandler;
+		I2C_PCF8574_write(fd := fd, address := 16#21, pin_values := cumm_do_3);
+		
+		cumm_do_4[0] := outputs^.HK_waermer;
+		cumm_do_4[1] := outputs^.HK_kaelter;
+		cumm_do_4[2] := outputs^.FBH_waermer;
+		cumm_do_4[3] := outputs^.FBH_kaelter;
+		cumm_do_4[4] := outputs^.Schichtlader_mitte_laden;
+		cumm_do_4[5] := outputs^.Schichtlader_fahren;
+		cumm_do_4[6] := outputs^.Pumpe_HK;
+		cumm_do_4[7] := outputs^.Pumpe_FBH;
+		I2C_PCF8574_write(fd := fd, address := 16#23, pin_values := cumm_do_4);
+		
+		ENO := TRUE;
+	ELSE
+		ENO := FALSE;
+	END_IF;
+
+END_FUNCTION_BLOCK
